@@ -74,6 +74,12 @@ def test_reverse_dependencies(from_line, tmpdir):
     cache[from_line("middle==0.4")] = ["bottom<6"]
     cache[from_line("bottom==5.3.5")] = []
     cache[from_line("bonus==0.4")] = []
+    cache[
+        from_line(
+            "https://github.com/jazzband/pip-tools/archive/"
+            "7d86c8d3ecd1faa6be11c7ddc6b29a30ffd1dae3.zip#egg=pip-tools==1.8.1rc3"
+        )
+    ] = ["bottom"]
 
     # In this case, we're using top 1.2 without an extra, so the "bonus" package
     # is not depended upon.
@@ -102,6 +108,11 @@ def test_reverse_dependencies(from_line, tmpdir):
         "bottom": {"middle", "top"},
         "bonus": {"top"},
     }
+
+    reversed_url = cache.reverse_dependencies(
+        [from_line("pip-tools==1.8.1rc3"), from_line("bottom==5.3.5")]
+    )
+    assert reversed_url == {"bottom": {"pip-tools"}}
 
     # Clean up our temp directory
     rmtree(tmp_dir_path)

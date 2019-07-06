@@ -47,8 +47,8 @@ DEFAULT_REQUIREMENTS_OUTPUT_FILE = "requirements.txt"
 )
 @click.option(
     "-r",
-    "--rebuild",
-    is_flag=True,
+    "--rebuild/--no-rebuild",
+    default=False,
     help="Clear any caches upfront, rebuild from scratch",
 )
 @click.option(

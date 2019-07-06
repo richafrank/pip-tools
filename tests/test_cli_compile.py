@@ -1,18 +1,22 @@
 import os
+import shlex
 import subprocess
 import sys
 from textwrap import dedent
 
 import mock
 import pytest
+from click._compat import string_types
 from click.testing import CliRunner
 from pip import __version__ as pip_version
 from pip._vendor.packaging.version import parse as parse_version
 from pytest import mark
+from six import wraps
 
 from .utils import invoke
 
 from piptools._compat.pip_compat import path_to_url
+from piptools.cache import DependencyCache
 from piptools.repositories import PyPIRepository
 from piptools.scripts.compile import cli
 
@@ -23,6 +27,12 @@ MINIMAL_WHEELS_PATH = os.path.join(TEST_DATA_PATH, "minimal_wheels")
 fail_below_pip9 = pytest.mark.xfail(
     PIP_VERSION < parse_version("9"), reason="needs pip 9 or greater"
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    cache = DependencyCache()
+    cache.clear()
 
 
 @pytest.fixture
@@ -47,6 +57,40 @@ def pip_conf(tmpdir, monkeypatch):
         yield path
     finally:
         os.remove(path)
+
+
+class CliRebuildRunner(CliRunner):
+    @wraps(CliRunner.invoke)
+    def invoke(
+        self,
+        runner_cli,
+        args=None,
+        input=None,
+        env=None,
+        catch_exceptions=True,
+        color=False,
+        mix_stderr=False,
+        **extra
+    ):
+        assert runner_cli is cli
+
+        if isinstance(args, string_types):
+            args = shlex.split(args)
+        elif args is None:
+            args = ()
+
+        args = list(args)
+        if not ("--rebuild" in args or "--no-rebuild" in args):
+            args.append("--rebuild")
+
+        return super(CliRebuildRunner, self).invoke(
+            runner_cli, args, input, env, catch_exceptions, color, mix_stderr, **extra
+        )
+
+
+@pytest.fixture
+def runner_class():
+    return CliRebuildRunner
 
 
 def test_default_pip_conf_read(pip_conf, runner):
@@ -204,7 +248,7 @@ def test_realistic_complex_sub_dependencies(runner):
     with open("requirements.in", "w") as req_in:
         req_in.write("fake_with_deps")  # require fake package
 
-    out = runner.invoke(cli, ["-v", "-n", "--rebuild", "-f", wheels_dir])
+    out = runner.invoke(cli, ["-v", "-n", "-f", wheels_dir])
 
     assert out.exit_code == 0
 
@@ -243,7 +287,7 @@ def test_editable_package_vcs(runner):
     )
     with open("requirements.in", "w") as req_in:
         req_in.write("-e " + vcs_package)
-    out = runner.invoke(cli, ["-n", "--rebuild"])
+    out = runner.invoke(cli, ["-n"])
     assert out.exit_code == 0
     assert vcs_package in out.stderr
     assert "click" in out.stderr  # dependency of pip-tools
@@ -339,7 +383,7 @@ def test_url_package(runner, line, dependency, rewritten_line, generate_hashes):
     with open("requirements.in", "w") as req_in:
         req_in.write(line)
     out = runner.invoke(
-        cli, ["-n", "--rebuild"] + (["--generate-hashes"] if generate_hashes else [])
+        cli, ["-n"] + (["--generate-hashes"] if generate_hashes else [])
     )
     assert out.exit_code == 0
     assert rewritten_line in out.stderr
@@ -625,14 +669,26 @@ def test_multiple_input_files_without_output_file(runner):
         ("--no-annotate", "six==1.10.0\n"),
     ],
 )
-def test_annotate_option(pip_conf, runner, option, expected):
+@pytest.mark.parametrize("is_url", [False, True])
+def test_annotate_option(pip_conf, runner, option, expected, from_line, is_url):
     """
-    The output lines has have annotations if option is turned on.
+    The output lines have annotations if option is turned on.
     """
-    with open("requirements.in", "w") as req_in:
-        req_in.write("small_fake_with_deps")
+    dep_cache = DependencyCache()
+    dep_cache[from_line("six==1.10.0")] = []
+    dep_cache.write_cache()
 
-    out = runner.invoke(cli, [option, "-n", "-f", MINIMAL_WHEELS_PATH])
+    with open("requirements.in", "w") as req_in:
+        pkg = "small_fake_with_deps"
+        if is_url:
+            pkg = path_to_url(
+                os.path.join(
+                    TEST_DATA_PATH, "minimal_wheels", pkg + "-0.1-py2.py3-none-any.whl"
+                )
+            )
+        req_in.write(pkg)
+
+    out = runner.invoke(cli, [option, "-n", "-f", MINIMAL_WHEELS_PATH, "--no-rebuild"])
 
     assert expected in out.stderr
     assert out.exit_code == 0
