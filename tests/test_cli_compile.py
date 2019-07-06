@@ -7,7 +7,7 @@ import mock
 import pytest
 from pytest import mark
 
-from .constants import MINIMAL_WHEELS_PATH, PACKAGES_PATH
+from .constants import MINIMAL_WHEELS_PATH, PACKAGES_PATH, TEST_DATA_PATH
 from .utils import invoke
 
 from piptools._compat.pip_compat import PIP_VERSION, path_to_url
@@ -656,12 +656,21 @@ def test_multiple_input_files_without_output_file(runner):
         ("--no-annotate", "small-fake-a==0.1\n"),
     ],
 )
-def test_annotate_option(pip_conf, runner, option, expected):
+@pytest.mark.parametrize("is_url", [False, True])
+def test_annotate_option(pip_conf, runner, option, expected, from_line, is_url):
     """
-    The output lines has have annotations if option is turned on.
+    The output lines have annotations if option is turned on.
     """
     with open("requirements.in", "w") as req_in:
-        req_in.write("small_fake_with_deps")
+        pkg = "small_fake_with_deps"
+
+        if is_url:
+            pkg = path_to_url(
+                os.path.join(
+                    TEST_DATA_PATH, "minimal_wheels", pkg + "-0.1-py2.py3-none-any.whl"
+                )
+            )
+        req_in.write(pkg)
 
     out = runner.invoke(cli, [option, "-n"])
 
@@ -671,7 +680,10 @@ def test_annotate_option(pip_conf, runner, option, expected):
 
 @pytest.mark.parametrize(
     "option, expected",
-    [("--allow-unsafe", "small-fake-a==0.1"), (None, "# small-fake-a")],
+    [
+        ("--allow-unsafe", "small-fake-a==0.1         # via small-fake-with-deps"),
+        (None, "# small-fake-a"),
+    ],
 )
 def test_allow_unsafe_option(pip_conf, monkeypatch, runner, option, expected):
     """
