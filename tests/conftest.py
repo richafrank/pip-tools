@@ -24,6 +24,7 @@ from piptools.repositories.base import BaseRepository
 from piptools.resolver import Resolver
 from piptools.utils import (
     as_tuple,
+    is_pinned_requirement,
     is_url_requirement,
     key_from_ireq,
     key_from_req,
@@ -69,6 +70,13 @@ class FakeRepository(BaseRepository):
     def get_dependencies(self, ireq):
         if ireq.editable or is_url_requirement(ireq):
             return self.editables[str(ireq.link)]
+
+        if not is_pinned_requirement(ireq):
+            raise TypeError(
+                "Expected url, pinned or editable InstallRequirement, got {}".format(
+                    ireq
+                )
+            )
 
         name, version, extras = as_tuple(ireq)
         # Store non-extra dependencies under the empty string

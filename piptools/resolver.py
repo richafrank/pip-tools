@@ -350,7 +350,9 @@ class Resolver(object):
         if ireq.constraint:
             return
 
-        if ireq.editable or self._is_unpinned_url_req(ireq):
+        if ireq.editable:
+            pass
+        elif self._is_unpinned_url_req(ireq):
             for dependency in self.repository.get_dependencies(ireq):
                 yield dependency
 
@@ -389,10 +391,10 @@ class Resolver(object):
             )
 
     def reverse_dependencies(self, ireqs):
-        pinned = [
+        editable_or_pinned = [
             ireq
             for ireq in ireqs
-            if not (ireq.editable or self._is_unpinned_url_req(ireq))
+            if ireq.editable or not self._is_unpinned_url_req(ireq)
         ]
 
-        return self.dependency_cache.reverse_dependencies(pinned)
+        return self.dependency_cache.reverse_dependencies(editable_or_pinned)

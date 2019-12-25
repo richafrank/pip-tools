@@ -9,7 +9,12 @@ import six
 from click.utils import LazyFile
 from six.moves import shlex_quote
 
-from ._compat import PIP_VERSION, InstallCommand, install_req_from_line
+from ._compat import (
+    PIP_VERSION,
+    InstallCommand,
+    InstallRequirement,
+    install_req_from_line,
+)
 from .click import style
 
 UNSAFE_PACKAGES = {"setuptools", "distribute", "pip"}
@@ -119,26 +124,49 @@ def is_pinned_requirement(ireq):
         django~=1.8   # NOT pinned
         django==1.*   # NOT pinned
     """
+    return get_pinned_version(ireq) is not None
+
+
+def get_pinned_version(ireq):
+    """
+    Get pinned version of a requirement, if it is pinned.
+    :type ireq: InstallRequirement|str
+    :type ignore_editables: bool
+    """
+    if not isinstance(ireq, InstallRequirement):
+        ireq = InstallRequirement(ireq, None)
+
     if ireq.editable:
-        return False
+        return None
 
-    if ireq.req is None or len(ireq.specifier._specs) != 1:
-        return False
+    return get_ireq_version(ireq)
 
-    op, version = next(iter(ireq.specifier._specs))._spec
-    return (op == "==" or op == "===") and not version.endswith(".*")
+
+def get_ireq_version(ireq):
+    """
+    Get version of a requirement even if it's editable.
+    :type ireq: InstallRequirement
+    """
+    if ireq.req is None or ireq.specifier is None or len(ireq.specifier._specs) != 1:
+        return None
+
+    specs = (x._spec for x in ireq.specifier._specs)
+    versions = {
+        version
+        for (op, version) in specs
+        if (op == "==" or op == "===") and not version.endswith(".*")
+    }
+    return next(iter(versions), None)
 
 
 def as_tuple(ireq):
     """
     Pulls out the (name: str, version:str, extras:(str)) tuple from
-    the pinned InstallRequirement.
+    the InstallRequirement.
+    :type ireq: InstallRequirement
     """
-    if not is_pinned_requirement(ireq):
-        raise TypeError("Expected a pinned InstallRequirement, got {}".format(ireq))
-
     name = key_from_ireq(ireq)
-    version = next(iter(ireq.specifier._specs))._spec[1]
+    version = get_ireq_version(ireq)
     extras = tuple(sorted(ireq.extras))
     return name, version, extras
 

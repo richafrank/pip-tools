@@ -121,8 +121,9 @@ def test_as_tuple(from_line):
     should_be_rejected = ["foo==1.*", "foo~=1.1,<1.5,>1.2", "foo"]
     for spec in should_be_rejected:
         ireq = from_line(spec)
-        with raises(TypeError):
-            as_tuple(ireq)
+        name, version, extras = as_tuple(ireq)
+        assert name == "foo"
+        assert version is None
 
 
 def test_flat_map():

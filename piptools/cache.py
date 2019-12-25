@@ -68,16 +68,17 @@ class DependencyCache(object):
 
         self._cache_file = os.path.join(cache_dir, cache_filename)
         self._cache = None
+        self._editable_cache = {}
 
-    @property
-    def cache(self):
+    def cache(self, editable):
         """
         The dictionary that is the actual in-memory cache.  This property
         lazily loads the cache from disk.
         """
         if self._cache is None:
             self.read_cache()
-        return self._cache
+
+        return self._editable_cache if editable else self._cache
 
     def as_cache_key(self, ireq):
         """
@@ -97,7 +98,7 @@ class DependencyCache(object):
             extras_string = ""
         else:
             extras_string = "[{}]".format(",".join(extras))
-        return name, "{}{}".format(version, extras_string)
+        return name, "{}{}".format(version, extras_string), ireq.editable
 
     def read_cache(self):
         """Reads the cached contents into memory."""
@@ -117,17 +118,18 @@ class DependencyCache(object):
         self.write_cache()
 
     def __contains__(self, ireq):
-        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
-        return pkgversion_and_extras in self.cache.get(pkgname, {})
+        pkgname, pkgversion_and_extras, editable = self.as_cache_key(ireq)
+        return pkgversion_and_extras in self.cache(editable).get(pkgname, {})
 
     def __getitem__(self, ireq):
-        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
-        return self.cache[pkgname][pkgversion_and_extras]
+        pkgname, pkgversion_and_extras, editable = self.as_cache_key(ireq)
+        return self.cache(editable)[pkgname][pkgversion_and_extras]
 
     def __setitem__(self, ireq, values):
-        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
-        self.cache.setdefault(pkgname, {})
-        self.cache[pkgname][pkgversion_and_extras] = values
+        pkgname, pkgversion_and_extras, editable = self.as_cache_key(ireq)
+        cache = self.cache(editable)
+        cache.setdefault(pkgname, {})
+        cache[pkgname][pkgversion_and_extras] = values
         self.write_cache()
 
     def reverse_dependencies(self, ireqs):
@@ -148,10 +150,10 @@ class DependencyCache(object):
 
         Example input:
 
-            [('pep8', '1.5.7'),
-             ('flake8', '2.4.0'),
-             ('mccabe', '0.3'),
-             ('pyflakes', '0.8.1')]
+            [('pep8', '1.5.7', False),
+             ('flake8', '2.4.0', True),
+             ('mccabe', '0.3', False),
+             ('pyflakes', '0.8.1', False)]
 
         Example output:
 
@@ -165,6 +167,6 @@ class DependencyCache(object):
         # tuples, like [('flake8', 'pep8'), ('flake8', 'mccabe'), ...]
         return lookup_table(
             (key_from_req(Requirement(dep_name)), name)
-            for name, version_and_extras in cache_keys
-            for dep_name in self.cache[name][version_and_extras]
+            for name, version_and_extras, editable in cache_keys
+            for dep_name in self.cache(editable)[name][version_and_extras]
         )

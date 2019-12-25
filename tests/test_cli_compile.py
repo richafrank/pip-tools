@@ -507,10 +507,12 @@ def test_generate_hashes_with_editable(pip_conf, runner):
         "-e {}\n"
         "small-fake-a==0.1 \\\n"
         "    --hash=sha256:5e6071ee6e4c59e0d0408d366f"
-        "e9b66781d2cf01be9a6e19a2433bb3c5336330\n"
+        "e9b66781d2cf01be9a6e19a2433bb3c5336330 \\\n"
+        "    # via small-fake-with-deps\n"
         "small-fake-b==0.1 \\\n"
         "    --hash=sha256:acdba8f8b8a816213c30d5310c"
-        "3fe296c0107b16ed452062f7f994a5672e3b3f\n"
+        "3fe296c0107b16ed452062f7f994a5672e3b3f \\\n"
+        "    # via small-fake-with-deps\n"
     ).format(small_fake_package_url)
     assert out.exit_code == 0
     assert expected in out.stderr
