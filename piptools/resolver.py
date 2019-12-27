@@ -320,16 +320,6 @@ class Resolver(object):
         best_match.comes_from = ireq.comes_from
         return best_match
 
-    def _is_unpinned_url_req(self, ireq):
-        if is_url_requirement(ireq):
-            if is_pinned_requirement(ireq):
-                return False
-
-            self.repository.get_dependencies(ireq)
-            return not is_pinned_requirement(ireq)
-
-        return False
-
     def _iter_dependencies(self, ireq):
         """
         Given a pinned, url, or editable InstallRequirement, collects all the
@@ -350,15 +340,9 @@ class Resolver(object):
         if ireq.constraint:
             return
 
-        if ireq.editable:
-            pass
-        elif self._is_unpinned_url_req(ireq):
-            for dependency in self.repository.get_dependencies(ireq):
-                yield dependency
-
-            return
-
-        elif not is_pinned_requirement(ireq):
+        if not (
+            ireq.editable or is_url_requirement(ireq) or is_pinned_requirement(ireq)
+        ):
             raise TypeError(
                 "Expected pinned or editable requirement, got {}".format(ireq)
             )
@@ -391,10 +375,4 @@ class Resolver(object):
             )
 
     def reverse_dependencies(self, ireqs):
-        editable_or_pinned = [
-            ireq
-            for ireq in ireqs
-            if ireq.editable or not self._is_unpinned_url_req(ireq)
-        ]
-
-        return self.dependency_cache.reverse_dependencies(editable_or_pinned)
+        return self.dependency_cache.reverse_dependencies(ireqs)

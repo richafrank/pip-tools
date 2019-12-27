@@ -9,7 +9,7 @@ import sys
 from pip._vendor.packaging.requirements import Requirement
 
 from .exceptions import PipToolsError
-from .utils import as_tuple, key_from_req, lookup_table
+from .utils import as_tuple, is_pinned_requirement, key_from_req, lookup_table
 
 _PEP425_PY_TAGS = {"cpython": "cp", "pypy": "pp", "ironpython": "ip", "jython": "jy"}
 
@@ -68,17 +68,17 @@ class DependencyCache(object):
 
         self._cache_file = os.path.join(cache_dir, cache_filename)
         self._cache = None
-        self._editable_cache = {}
+        self._unpinned_cache = {}
 
-    def cache(self, editable):
+    def cache(self, unpinned):
         """
         The dictionary that is the actual in-memory cache.  This property
-        lazily loads the cache from disk.
+        lazily loads the cache from disk for pinned dependencies.
         """
         if self._cache is None:
             self.read_cache()
 
-        return self._editable_cache if editable else self._cache
+        return self._unpinned_cache if unpinned else self._cache
 
     def as_cache_key(self, ireq):
         """
@@ -98,7 +98,11 @@ class DependencyCache(object):
             extras_string = ""
         else:
             extras_string = "[{}]".format(",".join(extras))
-        return name, "{}{}".format(version, extras_string), ireq.editable
+        return (
+            name,
+            "{}{}".format(version, extras_string),
+            not is_pinned_requirement(ireq),
+        )
 
     def read_cache(self):
         """Reads the cached contents into memory."""
@@ -118,16 +122,16 @@ class DependencyCache(object):
         self.write_cache()
 
     def __contains__(self, ireq):
-        pkgname, pkgversion_and_extras, editable = self.as_cache_key(ireq)
-        return pkgversion_and_extras in self.cache(editable).get(pkgname, {})
+        pkgname, pkgversion_and_extras, unpinned = self.as_cache_key(ireq)
+        return pkgversion_and_extras in self.cache(unpinned).get(pkgname, {})
 
     def __getitem__(self, ireq):
-        pkgname, pkgversion_and_extras, editable = self.as_cache_key(ireq)
-        return self.cache(editable)[pkgname][pkgversion_and_extras]
+        pkgname, pkgversion_and_extras, unpinned = self.as_cache_key(ireq)
+        return self.cache(unpinned)[pkgname][pkgversion_and_extras]
 
     def __setitem__(self, ireq, values):
-        pkgname, pkgversion_and_extras, editable = self.as_cache_key(ireq)
-        cache = self.cache(editable)
+        pkgname, pkgversion_and_extras, unpinned = self.as_cache_key(ireq)
+        cache = self.cache(unpinned)
         cache.setdefault(pkgname, {})
         cache[pkgname][pkgversion_and_extras] = values
         self.write_cache()
@@ -167,6 +171,6 @@ class DependencyCache(object):
         # tuples, like [('flake8', 'pep8'), ('flake8', 'mccabe'), ...]
         return lookup_table(
             (key_from_req(Requirement(dep_name)), name)
-            for name, version_and_extras, editable in cache_keys
-            for dep_name in self.cache(editable)[name][version_and_extras]
+            for name, version_and_extras, unpinned in cache_keys
+            for dep_name in self.cache(unpinned)[name][version_and_extras]
         )
