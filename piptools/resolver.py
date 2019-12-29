@@ -375,4 +375,9 @@ class Resolver(object):
             )
 
     def reverse_dependencies(self, ireqs):
-        return self.dependency_cache.reverse_dependencies(ireqs)
+        pinned_or_editable = [
+            ireq
+            for ireq in ireqs
+            if ireq.editable or is_url_requirement(ireq) or is_pinned_requirement(ireq)
+        ]
+        return self.dependency_cache.reverse_dependencies(pinned_or_editable)

@@ -9,7 +9,7 @@ import sys
 from pip._vendor.packaging.requirements import Requirement
 
 from .exceptions import PipToolsError
-from .utils import as_tuple, is_pinned_requirement, key_from_req, lookup_table
+from .utils import as_tuple, is_url_requirement, key_from_req, lookup_table
 
 _PEP425_PY_TAGS = {"cpython": "cp", "pypy": "pp", "ironpython": "ip", "jython": "jy"}
 
@@ -101,7 +101,7 @@ class DependencyCache(object):
         return (
             name,
             "{}{}".format(version, extras_string),
-            not is_pinned_requirement(ireq),
+            (ireq.editable or is_url_requirement(ireq)),
         )
 
     def read_cache(self):

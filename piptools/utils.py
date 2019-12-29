@@ -165,6 +165,9 @@ def as_tuple(ireq):
     the InstallRequirement.
     :type ireq: InstallRequirement
     """
+    if not (ireq.editable or is_url_requirement(ireq) or is_pinned_requirement(ireq)):
+        raise TypeError("Expected a pinned InstallRequirement, got {}".format(ireq))
+
     name = key_from_ireq(ireq)
     version = get_ireq_version(ireq)
     extras = tuple(sorted(ireq.extras))
