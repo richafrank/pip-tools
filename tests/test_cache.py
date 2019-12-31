@@ -1,3 +1,4 @@
+import os.path
 from contextlib import contextmanager
 from os import remove
 from shutil import rmtree
@@ -5,7 +6,15 @@ from tempfile import NamedTemporaryFile
 
 from pytest import raises
 
-from piptools.cache import CorruptCacheError, DependencyCache, read_cache_file
+from tests.constants import PACKAGES_PATH
+
+from piptools._compat import path_to_url
+from piptools.cache import (
+    CorruptCacheError,
+    DependencyCache,
+    _implementation_name,
+    read_cache_file,
+)
 
 
 @contextmanager
@@ -60,6 +69,35 @@ def test_read_cache_file_successful():
         '{"__format__": 1, "dependencies": "success"}'
     ) as cache_file_name:
         assert "success" == read_cache_file(cache_file_name)
+
+
+def test_read_cache_file_before_unpinned(tmpdir, from_line):
+    cache_filename = "depcache-{}.json".format(_implementation_name())
+    with open(str(tmpdir / cache_filename), "w") as cache_file:
+        cache_file.write('{"__format__": 1, "dependencies": {"top": {"1":["bottom"]}}}')
+
+    cache = DependencyCache(str(tmpdir))
+    top = from_line("top==1")
+    assert top in cache
+
+
+def test_write_cache_file_unpinned_not_written(
+    pip_conf, tmpdir, from_line, from_editable
+):
+    cache = DependencyCache(cache_dir=str(tmpdir))
+    top = from_line("top==1")
+    cache[top] = ["bottom"]
+
+    fake_package_dir = path_to_url(os.path.join(PACKAGES_PATH, "small_fake_with_deps"))
+    small_fake_with_deps = from_editable(fake_package_dir)
+    cache[small_fake_with_deps] = ["bottom"]
+
+    assert top in cache
+    assert small_fake_with_deps in cache
+
+    cache = DependencyCache(cache_dir=str(tmpdir))
+    assert top in cache
+    assert small_fake_with_deps not in cache
 
 
 def test_reverse_dependencies(from_line, tmpdir):

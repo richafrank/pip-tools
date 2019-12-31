@@ -9,7 +9,7 @@ import sys
 from pip._vendor.packaging.requirements import Requirement
 
 from .exceptions import PipToolsError
-from .utils import as_tuple, is_url_requirement, key_from_req, lookup_table
+from .utils import as_tuple, is_pinned_requirement, key_from_req, lookup_table
 
 _PEP425_PY_TAGS = {"cpython": "cp", "pypy": "pp", "ironpython": "ip", "jython": "jy"}
 
@@ -49,6 +49,14 @@ def read_cache_file(cache_file_path):
         return doc["dependencies"]
 
 
+class CacheKeyPackageName(str):
+    @classmethod
+    def init(cls, val, pinned):
+        self = cls(val)
+        self.pinned = pinned
+        return self
+
+
 class DependencyCache(object):
     """
     Creates a new persistent dependency cache for the current Python version.
@@ -68,17 +76,16 @@ class DependencyCache(object):
 
         self._cache_file = os.path.join(cache_dir, cache_filename)
         self._cache = None
-        self._unpinned_cache = {}
 
-    def cache(self, unpinned):
+    @property
+    def cache(self):
         """
         The dictionary that is the actual in-memory cache.  This property
         lazily loads the cache from disk for pinned dependencies.
         """
         if self._cache is None:
             self.read_cache()
-
-        return self._unpinned_cache if unpinned else self._cache
+        return self._cache
 
     def as_cache_key(self, ireq):
         """
@@ -100,8 +107,9 @@ class DependencyCache(object):
             extras_string = "[{}]".format(",".join(extras))
         return (
             name,
-            "{}{}".format(version, extras_string),
-            (ireq.editable or is_url_requirement(ireq)),
+            CacheKeyPackageName.init(
+                "{}{}".format(version, extras_string), is_pinned_requirement(ireq)
+            ),
         )
 
     def read_cache(self):
@@ -111,9 +119,31 @@ class DependencyCache(object):
         else:
             self._cache = {}
 
+    @staticmethod
+    def _filtered_cache(cache):
+        """
+        Filters out unpinned versions and any packages with no versions listed
+        because they were filtered out
+        """
+
+        def filtered_cache_val(cache_val):
+            return {
+                version: deps
+                for version, deps in cache_val.items()
+                if getattr(version, "pinned", True)
+            }
+
+        filtered_vals = (
+            (name, filtered_cache_val(cache_val)) for name, cache_val in cache.items()
+        )
+        filtered_keys = {
+            name: cache_val for name, cache_val in filtered_vals if cache_val
+        }
+        return filtered_keys
+
     def write_cache(self):
         """Writes the cache to disk as JSON."""
-        doc = {"__format__": 1, "dependencies": self._cache}
+        doc = {"__format__": 1, "dependencies": self._filtered_cache(self._cache)}
         with open(self._cache_file, "w") as f:
             json.dump(doc, f, sort_keys=True)
 
@@ -122,18 +152,17 @@ class DependencyCache(object):
         self.write_cache()
 
     def __contains__(self, ireq):
-        pkgname, pkgversion_and_extras, unpinned = self.as_cache_key(ireq)
-        return pkgversion_and_extras in self.cache(unpinned).get(pkgname, {})
+        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
+        return pkgversion_and_extras in self.cache.get(pkgname, {})
 
     def __getitem__(self, ireq):
-        pkgname, pkgversion_and_extras, unpinned = self.as_cache_key(ireq)
-        return self.cache(unpinned)[pkgname][pkgversion_and_extras]
+        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
+        return self.cache[pkgname][pkgversion_and_extras]
 
     def __setitem__(self, ireq, values):
-        pkgname, pkgversion_and_extras, unpinned = self.as_cache_key(ireq)
-        cache = self.cache(unpinned)
-        cache.setdefault(pkgname, {})
-        cache[pkgname][pkgversion_and_extras] = values
+        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
+        self.cache.setdefault(pkgname, {})
+        self.cache[pkgname][pkgversion_and_extras] = values
         self.write_cache()
 
     def reverse_dependencies(self, ireqs):
@@ -154,10 +183,10 @@ class DependencyCache(object):
 
         Example input:
 
-            [('pep8', '1.5.7', False),
-             ('flake8', '2.4.0', True),
-             ('mccabe', '0.3', False),
-             ('pyflakes', '0.8.1', False)]
+            [('pep8', '1.5.7'),
+             ('flake8', '2.4.0'),
+             ('mccabe', '0.3'),
+             ('pyflakes', '0.8.1')]
 
         Example output:
 
@@ -171,6 +200,6 @@ class DependencyCache(object):
         # tuples, like [('flake8', 'pep8'), ('flake8', 'mccabe'), ...]
         return lookup_table(
             (key_from_req(Requirement(dep_name)), name)
-            for name, version_and_extras, unpinned in cache_keys
-            for dep_name in self.cache(unpinned)[name][version_and_extras]
+            for name, version_and_extras in cache_keys
+            for dep_name in self.cache[name][version_and_extras]
         )
