@@ -4,7 +4,8 @@ from os import remove
 from shutil import rmtree
 from tempfile import NamedTemporaryFile
 
-from pytest import raises
+import pytest
+from pytest import mark, raises
 
 from tests.constants import PACKAGES_PATH
 
@@ -100,7 +101,7 @@ def test_write_cache_file_unpinned_not_written(
     assert small_fake_with_deps not in cache
 
 
-def test_reverse_dependencies(from_line, tmpdir):
+def test_reverse_dependencies(from_line, from_editable, tmpdir):
     # Since this is a test, make a temporary directory. Converting to str from py.path.
     tmp_dir_path = str(tmpdir)
 
@@ -118,6 +119,9 @@ def test_reverse_dependencies(from_line, tmpdir):
             "7d86c8d3ecd1faa6be11c7ddc6b29a30ffd1dae3.zip#egg=pip-tools==1.8.1rc3"
         )
     ] = ["bottom"]
+    fake_package_dir = path_to_url(os.path.join(PACKAGES_PATH, "small_fake_with_deps"))
+    small_fake_with_deps = from_editable(fake_package_dir)
+    cache[small_fake_with_deps] = ["middle"]
 
     # In this case, we're using top 1.2 without an extra, so the "bonus" package
     # is not depended upon.
@@ -127,9 +131,14 @@ def test_reverse_dependencies(from_line, tmpdir):
             from_line("middle==0.4"),
             from_line("bottom==5.3.5"),
             from_line("bonus==0.4"),
+            from_line("pip-tools==1.8.1rc3"),
+            small_fake_with_deps,
         ]
     )
-    assert reversed_no_extra == {"middle": {"top"}, "bottom": {"middle", "top"}}
+    assert reversed_no_extra == {
+        "middle": {"top", fake_package_dir},
+        "bottom": {"middle", "top", "pip-tools"},
+    }
 
     # Now we're using top 1.2 with the "xtra" extra, so it depends
     # on the "bonus" package.
@@ -139,18 +148,23 @@ def test_reverse_dependencies(from_line, tmpdir):
             from_line("middle==0.4"),
             from_line("bottom==5.3.5"),
             from_line("bonus==0.4"),
+            from_line("pip-tools==1.8.1rc3"),
+            small_fake_with_deps,
         ]
     )
     assert reversed_extra == {
-        "middle": {"top"},
-        "bottom": {"middle", "top"},
+        "middle": {"top", fake_package_dir},
+        "bottom": {"middle", "top", "pip-tools"},
         "bonus": {"top"},
     }
 
-    reversed_url = cache.reverse_dependencies(
-        [from_line("pip-tools==1.8.1rc3"), from_line("bottom==5.3.5")]
-    )
-    assert reversed_url == {"bottom": {"pip-tools"}}
-
     # Clean up our temp directory
     rmtree(tmp_dir_path)
+
+
+@mark.parametrize("unpinned", [pytest.param("unpinned"), pytest.param("unpinned>5")])
+def test_cache_unpinned(tmpdir, from_line, unpinned):
+    cache = DependencyCache(cache_dir=str(tmpdir))
+
+    with pytest.raises(TypeError):
+        cache[from_line(unpinned)] = ["package"]
