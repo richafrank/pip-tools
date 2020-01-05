@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import sys
+from itertools import chain
 
 from pip._vendor.packaging.requirements import Requirement
 
@@ -49,14 +50,6 @@ def read_cache_file(cache_file_path):
         return doc["dependencies"]
 
 
-class CacheKeyPackageName(str):
-    @classmethod
-    def init(cls, val, pinned):
-        self = cls(val)
-        self.pinned = pinned
-        return self
-
-
 class DependencyCache(object):
     """
     Creates a new persistent dependency cache for the current Python version.
@@ -76,6 +69,7 @@ class DependencyCache(object):
 
         self._cache_file = os.path.join(cache_dir, cache_filename)
         self._cache = None
+        self._unpinned_cache = {}
 
     @property
     def cache(self):
@@ -107,9 +101,8 @@ class DependencyCache(object):
             extras_string = "[{}]".format(",".join(extras))
         return (
             name,
-            CacheKeyPackageName.init(
-                "{}{}".format(version, extras_string), is_pinned_requirement(ireq)
-            ),
+            "{}{}".format(version, extras_string),
+            is_pinned_requirement(ireq),
         )
 
     def read_cache(self):
@@ -119,31 +112,9 @@ class DependencyCache(object):
         else:
             self._cache = {}
 
-    @staticmethod
-    def _filtered_cache(cache):
-        """
-        Filters out unpinned versions and any packages with no versions listed
-        because they were filtered out
-        """
-
-        def filtered_cache_val(cache_val):
-            return {
-                version: deps
-                for version, deps in cache_val.items()
-                if getattr(version, "pinned", True)
-            }
-
-        filtered_vals = (
-            (name, filtered_cache_val(cache_val)) for name, cache_val in cache.items()
-        )
-        filtered_keys = {
-            name: cache_val for name, cache_val in filtered_vals if cache_val
-        }
-        return filtered_keys
-
     def write_cache(self):
         """Writes the cache to disk as JSON."""
-        doc = {"__format__": 1, "dependencies": self._filtered_cache(self._cache)}
+        doc = {"__format__": 1, "dependencies": self._cache}
         with open(self._cache_file, "w") as f:
             json.dump(doc, f, sort_keys=True)
 
@@ -152,18 +123,26 @@ class DependencyCache(object):
         self.write_cache()
 
     def __contains__(self, ireq):
-        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
-        return pkgversion_and_extras in self.cache.get(pkgname, {})
+        pkgname, pkgversion_and_extras, _ = self.as_cache_key(ireq)
+        return pkgversion_and_extras in self.cache.get(
+            pkgname, {}
+        ) or pkgversion_and_extras in self._unpinned_cache.get(pkgname, {})
 
     def __getitem__(self, ireq):
-        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
-        return self.cache[pkgname][pkgversion_and_extras]
+        pkgname, pkgversion_and_extras, _ = self.as_cache_key(ireq)
+        return (
+            self.cache[pkgname][pkgversion_and_extras]
+            if pkgversion_and_extras in self.cache.get(pkgname, {})
+            else self._unpinned_cache[pkgname][pkgversion_and_extras]
+        )
 
     def __setitem__(self, ireq, values):
-        pkgname, pkgversion_and_extras = self.as_cache_key(ireq)
-        self.cache.setdefault(pkgname, {})
-        self.cache[pkgname][pkgversion_and_extras] = values
-        self.write_cache()
+        pkgname, pkgversion_and_extras, is_pinned = self.as_cache_key(ireq)
+        cache = self.cache if is_pinned else self._unpinned_cache
+        cache.setdefault(pkgname, {})
+        cache[pkgname][pkgversion_and_extras] = values
+        if is_pinned:
+            self.write_cache()
 
     def reverse_dependencies(self, ireqs):
         """
@@ -183,10 +162,10 @@ class DependencyCache(object):
 
         Example input:
 
-            [('pep8', '1.5.7'),
-             ('flake8', '2.4.0'),
-             ('mccabe', '0.3'),
-             ('pyflakes', '0.8.1')]
+            [('pep8', '1.5.7', True),
+             ('flake8', '2.4.0', False),
+             ('mccabe', '0.3', True),
+             ('pyflakes', '0.8.1', True)]
 
         Example output:
 
@@ -200,6 +179,9 @@ class DependencyCache(object):
         # tuples, like [('flake8', 'pep8'), ('flake8', 'mccabe'), ...]
         return lookup_table(
             (key_from_req(Requirement(dep_name)), name)
-            for name, version_and_extras in cache_keys
-            for dep_name in self.cache[name][version_and_extras]
+            for name, version_and_extras, _ in cache_keys
+            for dep_name in chain(
+                self.cache.get(name, {}).get(version_and_extras, []),
+                self._unpinned_cache.get(name, {}).get(version_and_extras, []),
+            )
         )
